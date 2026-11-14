@@ -3,7 +3,7 @@ name: Jagruk Meme Bot
 on:
   workflow_dispatch:
   schedule:
-    - cron: '30 4 * * *'
+    - cron: '30 4,9,14 * * *'
 
 permissions:
   contents: write
@@ -20,15 +20,13 @@ jobs:
         run: pip install -r requirements.txt
       - name: Run Bot
         run: |
-          ls -la
           python main.py
-          echo "--- OUTPUT CHECK ---"
-          ls -R output || echo "NO OUTPUT FOLDER"
+          echo "--- OUTPUT ---"
+          ls -R output
       - name: Commit and Push
         run: |
           git config user.name "Jagruk Meme Bot"
           git config user.email "bot@jagruk.com"
           git add -f output/ || true
-          git status
-          git commit -m "New memes $(date +'%Y-%m-%d %H:%M')" || echo "No changes to commit"
-          git push origin main || echo "Push failed"
+          git commit -m "New memes $(date +'%Y-%m-%d %H:%M')" || echo "No changes"
+          git push origin main
