@@ -1,9 +1,9 @@
-name: Jagruk Meme Bot - Auto Save to GitHub
+name: Jagruk Meme Bot
 
 on:
+  workflow_dispatch:
   schedule:
-    - cron: '30 4,9,14 * * *'  # 10AM, 3PM, 8PM IST = 04:30, 09:30, 14:30 UTC
-  workflow_dispatch:  # Manual run button
+    - cron: '30 4 * * *'
 
 permissions:
   contents: write
@@ -13,23 +13,22 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          
       - name: Install deps
         run: pip install -r requirements.txt
-        
-      - name: Run Bot - Fetch & Restyle 5 Memes
-    
-        run: python main.py --once --count 5
-        
-      - name: Commit & Push to GitHub
+      - name: Run Bot
+        run: |
+          ls -la
+          python main.py
+          echo "--- OUTPUT CHECK ---"
+          ls -R output || echo "NO OUTPUT FOLDER"
+      - name: Commit and Push
         run: |
           git config user.name "Jagruk Meme Bot"
           git config user.email "bot@jagruk.com"
-          git add output/ seen_urls.txt || true
-          git commit -m "New memes $(date +'%Y-%m-%d %H:%M')" || echo "No new memes"
-          git push origin main || echo "Nothing to push"
+          git add -f output/ || true
+          git status
+          git commit -m "New memes $(date +'%Y-%m-%d %H:%M')" || echo "No changes to commit"
+          git push origin main || echo "Push failed"
