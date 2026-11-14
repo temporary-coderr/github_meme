@@ -23,11 +23,7 @@ jobs:
         run: pip install -r requirements.txt
         
       - name: Run Bot - Fetch & Restyle 5 Memes
-        env:
-          REDDIT_CLIENT_ID: ${{ secrets.REDDIT_CLIENT_ID }}
-          REDDIT_CLIENT_SECRET: ${{ secrets.REDDIT_CLIENT_SECRET }}
-          REDDIT_USER_AGENT: jagruk-meme-bot-github
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+    
         run: python main.py --once --count 5
         
       - name: Commit & Push to GitHub
