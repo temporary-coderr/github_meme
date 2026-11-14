@@ -1,31 +1,33 @@
-name: Jagruk Meme Bot
+name: 1 - Send Memes to Telegram
 
 on:
   workflow_dispatch:
   schedule:
-    - cron: '30 4,9,14 * * *'
+    - cron: '30 4,9,14 * * *'  # 10 AM, 3 PM, 8 PM IST - Meme banao + Telegram bhejo
 
 permissions:
   contents: write
 
 jobs:
-  fetch-memes:
+  make-and-send:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Install deps
+      - name: Install
         run: pip install -r requirements.txt
-      - name: Run Bot
+      - name: Make Memes
+        run: python main.py
+      - name: Send to Telegram for Approval
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python telegram_sender.py
+      - name: Save to GitHub
         run: |
-          python main.py
-          echo "--- OUTPUT ---"
-          ls -R output
-      - name: Commit and Push
-        run: |
-          git config user.name "Jagruk Meme Bot"
+          git config user.name "Jagruk Bot"
           git config user.email "bot@jagruk.com"
           git add -f output/ || true
           git commit -m "New memes $(date +'%Y-%m-%d %H:%M')" || echo "No changes"
