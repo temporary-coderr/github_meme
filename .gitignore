@@ -1,0 +1,4 @@
+output/
+memes/
+__pycache__/
+.env
