@@ -1,34 +1,41 @@
-name: 1 - Send Memes to Telegram
+
+name: Jagruk Meme Bot
 
 on:
   workflow_dispatch:
+    inputs:
+      search:
+        description: "Search se naye memes laau?"
+        required: false
+        default: "yes"
   schedule:
-    - cron: '30 4,9,14 * * *'  # 10 AM, 3 PM, 8 PM IST - Meme banao + Telegram bhejo
-
-permissions:
-  contents: write
+    # Har 7 ghante me auto chalega - 12 AM, 7 AM, 2 PM, 9 PM IST approx
+    - cron: "30 18 * * *"  # 12 AM IST
+    - cron: "30 1 * * *"   # 7 AM IST
+    - cron: "30 8 * * *"   # 2 PM IST
+    - cron: "30 15 * * *"  # 9 PM IST
 
 jobs:
-  make-and-send:
+  make-memes:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
-      - name: Install
-        run: pip install -r requirements.txt
-      - name: Make Memes
-        run: python main.py
-      - name: Send to Telegram for Approval
+          python-version: "3.11"
+      - name: Install deps
+        run: |
+          pip install -r requirements.txt
+          sudo apt-get update && sudo apt-get install -y ffmpeg
+      - name: Run Bot - Search + Convert + Telegram
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python telegram_sender.py
-      - name: Save to GitHub
+        run: python main.py
+      - name: Save output
         run: |
-          git config user.name "Jagruk Bot"
-          git config user.email "bot@jagruk.com"
-          git add -f output/ || true
-          git commit -m "New memes $(date +'%Y-%m-%d %H:%M')" || echo "No changes"
-          git push origin main
+          git config user.name "jagruk-bot"
+          git config user.email "bot@jagruk.local"
+          git add output/ || true
+          git commit -m "Auto reels: $(date +'%Y-%m-%d %H:%M')" || echo "Kuch naya nahi"
+          git push || echo "Push skip"
