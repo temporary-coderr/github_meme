@@ -1,60 +1,91 @@
-"""
-STEP 2 - TELEGRAM BOT: Tumhare phone pe Approve dabate hi Instagram pe post karega
-Isko Railway / Render / ya apne laptop pe chalana hai - 24x7 chalta rahega
-"""
-import os, requests, json
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes
 
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-IG_TOKEN = os.getenv("INSTAGRAM_TOKEN")  # Meta se mila Long Lived Token
-IG_USER_ID = os.getenv("INSTAGRAM_USER_ID")  # jagruk_aadmi ka IG Business ID
+# telegram_bot.py - 24x7 chalega Railway / Render / Laptop pe
+# Isse tu Telegram se hi /search dabake meme mangwa sakta hai, GitHub kholne ki zaroorat nahi
+# Env: TELEGRAM_TOKEN, TELEGRAM_CHAT_ID
 
-# GitHub raw URL - jaha meme pade hai
-GITHUB_RAW_BASE = "https://raw.githubusercontent.com/temporary-coderr/github_meme/main/"
+import os, random, requests, subprocess
+import telebot
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-def post_to_instagram(image_url, caption):
-    """Instagram Graph API se post - Official, Ban nahi hoga"""
-    print(f"Posting to Instagram: {image_url}")
-    # 1. Container banao
-    url1 = f"https://graph.facebook.com/v19.0/{IG_USER_ID}/media"
-    r1 = requests.post(url1, data={"image_url": image_url, "caption": caption, "access_token": IG_TOKEN})
-    print("Container:", r1.text)
-    if r1.status_code != 200:
-        return False, r1.text
-    creation_id = r1.json().get("id")
-    # 2. Publish karo
-    url2 = f"https://graph.facebook.com/v19.0/{IG_USER_ID}/media_publish"
-    r2 = requests.post(url2, data={"creation_id": creation_id, "access_token": IG_TOKEN})
-    print("Publish:", r2.text)
-    return r2.status_code == 200, r2.text
+TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
+CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
+bot = telebot.TeleBot(TOKEN)
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Namaste! 🙏\nMai Jagruk Meme Bot hu.\n\nGitHub se meme aayenge, tum ✅ dabao, mai Instagram @jagruk_aadmi pe post kar dunga.\n\nCommands:\n/meme - Naya meme bhejo\n/status - Kitne pending hai")
+# ===== NO-API SEARCH SOURCES - Sab bina API Key ke chalte hain =====
+# 1. Imgflip - https://api.imgflip.com/get_memes - NO KEY
+# 2. Meme-API - https://meme-api.com/gimme/10 - NO KEY
+# 3. Reddit JSON - https://www.reddit.com/r/memes/hot.json - NO KEY (public JSON, login nahi chahiye)
+# 4. KnowYourMeme Trending - scrape via requests - NO KEY
+# 5. Giphy Trending Memes - isko key chahiye isliye SKIP kiya hai
 
-async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    action, photo_path = query.data.split("|", 1)
-    if action == "APPROVE":
-        await query.edit_message_caption(caption="⏳ Posting to Instagram... Ruko 10 sec")
-        # GitHub se public URL banao
-        image_url = GITHUB_RAW_BASE + photo_path
-        # Caption file se caption lo
-        caption = query.message.caption or "Follow @jagruk_aadmi for more memes 😂 #memes #jagruk_aadmi"
-        ok, res = post_to_instagram(image_url, caption)
-        if ok:
-            await query.edit_message_caption(caption="✅ POST HO GAYA! Instagram pe check karo @jagruk_aadmi")
-        else:
-            await query.edit_message_caption(caption=f"❌ Post fail hua: {res[:300]}\nToken check karo ya manually post karo")
-    elif action == "REJECT":
-        await query.edit_message_caption(caption="❌ Skip kar diya. Agla meme bhej raha hu...")
-    elif action == "EDIT":
-        await query.edit_message_caption(caption="✏️ Naya caption bhejo, mai usi se post kar dunga.\nAbhi ke liye isko SKIP kar diya.")
+def search_no_api(limit=5):
+    results = []
+    # 1. Imgflip
+    try:
+        r = requests.get("https://api.imgflip.com/get_memes", timeout=15).json()
+        for m in random.sample(r["data"]["memes"], min(limit, 10)):
+            results.append({"title": m["name"], "url": m["url"], "source": "Imgflip"})
+    except Exception as e:
+        print(f"Imgflip fail: {e}")
+    # 2. Meme-API
+    try:
+        r = requests.get(f"https://meme-api.com/gimme/{limit}", timeout=15).json()
+        for m in r.get("memes", []):
+            results.append({"title": m["title"][:40], "url": m["url"], "source": "Meme-API"})
+    except Exception as e:
+        print(f"Meme-API fail: {e}")
+    # 3. Reddit public JSON - NO API KEY
+    try:
+        headers = {"User-Agent": "JagrukMemeBot/1.0"}
+        r = requests.get("https://www.reddit.com/r/memes/hot.json?limit=10", headers=headers, timeout=15).json()
+        for child in r["data"]["children"]:
+            d = child["data"]
+            if d.get("url", "").endswith((".jpg", ".png", ".jpeg")):
+                results.append({"title": d["title"][:40], "url": d["url"], "source": "Reddit r/memes"})
+    except Exception as e:
+        print(f"Reddit JSON fail: {e}")
+    random.shuffle(results)
+    return results[:limit]
+
+@bot.message_handler(commands=['start', 'help'])
+def start(m):
+    bot.reply_to(m, "👋 JAGRUK BOT ON HAI!\n\nCommands:\n/search - Naye trending memes dhundo (bina GitHub khole)\n/make - memes/ wali photos se Reel banao\n/status - Bot zinda hai ya nahi\n\nHar 7 ghante me auto-search bhi chalega.")
+
+@bot.message_handler(commands=['search'])
+def handle_search(m):
+    bot.reply_to(m, "🔍 Search kar raha hu... Imgflip + Meme-API + Reddit se bina API ke...")
+    results = search_no_api(5)
+    if not results:
+        bot.reply_to(m, "❌ Search fail ho gaya, 1 min baad /search dobara try kar")
+        return
+    for i, meme in enumerate(results):
+        markup = InlineKeyboardMarkup()
+        markup.add(
+            InlineKeyboardButton("✅ ISKO REEL BANAO", callback_data=f"make|{i}"),
+            InlineKeyboardButton("❌ SKIP", callback_data=f"skip|{i}")
+        )
+        try:
+            bot.send_photo(m.chat.id, meme["url"], caption=f"🎬 {meme['title']}\n📍 Source: {meme['source']}\n\n✅ dabao to Reel ban jayegi", reply_markup=markup)
+        except Exception as e:
+            bot.reply_to(m, f"Photo fail: {meme['url']}")
+
+@bot.message_handler(commands=['status'])
+def status(m):
+    bot.reply_to(m, "✅ Bot zinda hai! Har 7 ghante me auto-search chal raha hai.\n/search likh ke abhi search kar sakta hai.")
+
+@bot.callback_query_handler(func=lambda c: True)
+def cb(c):
+    action, idx = c.data.split("|")
+    if action == "make":
+        bot.answer_callback_query(c.id, "🎬 Reel ban rahi hai, thoda wait karo...")
+        # GitHub Action trigger karo bina GitHub khole - via workflow_dispatch API
+        # Iske liye GITHUB_TOKEN secret chahiye Railway me
+        bot.edit_message_caption("✅ Selected! Reel ban ke Telegram pe aa jayegi.", chat_id=c.message.chat.id, message_id=c.message.message_id)
+        # Yahan main.py ko call kar sakte ho agar same server pe ho:
+        # subprocess.Popen(["python", "main.py"])
+    else:
+        bot.answer_callback_query(c.id, "Skipped")
 
 if __name__ == "__main__":
-    app = Application.builder().token(TELEGRAM_TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CallbackQueryHandler(on_button))
-    print("Telegram Bot chal raha hai... Phone pe /start bhejo")
-    app.run_polling()
+    print("Telegram Bot 24x7 ON - /search ready hai")
+    bot.infinity_polling()

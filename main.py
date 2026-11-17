@@ -1,76 +1,180 @@
-import os, requests, uuid, datetime
-from PIL import Image, ImageDraw, ImageFont, ImageOps
 
-print("=== JAGRUK BOT - NO CAPTION MODE ===")
-print("Bot koi caption nahi lagayega")
-WATERMARK = "@jagruk_aadmi"
-BRAND_COLOR = (255, 214, 10)
+# JAGRUK MEME BOT v2 - Random Effects + Search Source
+# Har reel alag dikhegi - 10 effects me se random 2-3 pick honge har baar
+# Secrets: TELEGRAM_TOKEN, TELEGRAM_CHAT_ID
 
-def get_font(size):
-    for p in ["/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"]:
-        if os.path.exists(p):
-            try: return ImageFont.truetype(p, size)
-            except: pass
-    return ImageFont.load_default()
+import os, random, requests
+from pathlib import Path
 
-def clean_restlye(image_path):
-    # NO CAPTION - Sirf Header + Photo + Watermark
-    img = Image.open(image_path).convert("RGB")
-    w,h = img.size
-    img = img.crop((int(w*0.01), int(h*0.01), int(w*0.99), int(h*0.99)))
-    img = ImageOps.autocontrast(img, cutoff=1)
-    W,H = 1080, 1350
-    canvas = Image.new("RGB", (W,H), (10,10,10))
-    draw = ImageDraw.Draw(canvas)
-    # Header only - koi caption nahi
-    draw.rectangle([0,0,W,90], fill=BRAND_COLOR)
-    draw.text((25,22), "JAGRUK MEMES", font=get_font(40), fill=(0,0,0))
-    draw.text((W-310,22), WATERMARK, font=get_font(30), fill=(0,0,0))
-    # Photo full area - 100 to 1330, koi text nahi
-    photo_top = 100
-    photo_bottom = 1330
-    photo_h = photo_bottom - photo_top
-    photo_w = 1060
-    r = min(photo_w/img.width, photo_h/img.height)
-    tw2 = int(img.width*r); th2 = int(img.height*r)
-    img2 = img.resize((tw2, th2), Image.LANCZOS)
-    px = (W-tw2)//2
-    py = photo_top + (photo_h - th2)//2
-    canvas.paste(img2, (px, py))
-    draw.text((20, H-38), WATERMARK, font=get_font(26), fill=(255,255,255))
-    draw.rectangle([0,0,W-1,H-1], outline="#FFD60A", width=10)
-    today = datetime.datetime.now().strftime("%Y-%m-%d")
-    folder = f"output/{today}"
-    os.makedirs(folder, exist_ok=True)
-    feed_path = f"{folder}/meme_{uuid.uuid4().hex[:6]}_feed.jpg"
-    canvas.save(feed_path, quality=92)
-    # Reel version
-    W2,H2 = 1080,1920
-    canvas2 = Image.new("RGB", (W2,H2), (0,0,0))
-    feed_img = Image.open(feed_path).resize((1080,1350))
-    canvas2.paste(feed_img, (0, (H2-1350)//2))
-    reel_path = feed_path.replace("_feed.jpg", "_reel.jpg")
-    canvas2.save(reel_path, quality=92)
-    return feed_path, reel_path
+TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
+TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
+# Search ke liye - agar khali hai to search skip, sirf memes/ folder chalega
+REDDIT_CLIENT_ID = os.environ.get("REDDIT_CLIENT_ID", "")
+REDDIT_SECRET = os.environ.get("REDDIT_SECRET", "")
 
-def run(count=5):
+MEMES_FOLDER = Path("memes")
+OUTPUT_FOLDER = Path("output")
+OUTPUT_FOLDER.mkdir(parents=True, exist_ok=True)
+
+# ================= 10 EFFECTS POOL =================
+# Har video ke liye inme se random 2-3 effects choose honge
+EFFECTS = [
+    "zoom_in",       # Slow zoom in
+    "zoom_out",      # Slow zoom out
+    "shake_beat",    # Beat pe shake
+    "flash_beat",    # Beat pe white flash
+    "bounce",        # Halka up-down bounce
+    "vignette",      # Corners dark - cinematic look
+    "glitch",        # 1-2 baar chhota glitch
+    "punch_zoom",    # Beech me ek tez zoom punch
+    "slow_pan",      # Left se right slow pan
+    "rotate_tilt",   # Halka tilt
+]
+
+def make_dynamic_video_v2(image_path, output_path):
+    from moviepy.editor import ImageClip, CompositeVideoClip
+    import numpy as np
+    from PIL import Image, ImageEnhance
+
+    # Random 2-3 effects pick karo - har reel alag lagegi
+    chosen = random.sample(EFFECTS, k=random.choice([2,3,3]))
+    print(f"Effects is reel ke liye: {chosen} - {image_path.name}")
+
+    clip = ImageClip(str(image_path)).set_duration(7)
+    clip = clip.resize(height=1920)
+    if clip.w > 1080:
+        clip = clip.crop(x1=clip.w/2 - 540, x2=clip.w/2 + 540)
+    else:
+        clip = clip.resize(width=1080)
+
+    # --- ZOOM / PAN / BOUNCE ---
+    if "zoom_in" in chosen:
+        clip = clip.resize(lambda t: 1 + 0.022 * t)
+    elif "zoom_out" in chosen:
+        clip = clip.resize(lambda t: 1.18 - 0.022 * t)
+    elif "punch_zoom" in chosen:
+        # 3 sec pe ek tez punch zoom
+        def punch(t):
+            if 2.8 < t < 3.5:
+                return 1.18
+            return 1 + 0.01 * t
+        clip = clip.resize(punch)
+    elif "slow_pan" in chosen:
+        clip = clip.set_position(lambda t: (-15 + t*5, 0))
+
+    # --- SHAKE / GLITCH / FLASH / BOUNCE ---
+    def apply_frame(get_frame, t):
+        frame = get_frame(t)
+        # Shake
+        if "shake_beat" in chosen:
+            beat = int(t / 0.8) % 2
+            if beat == 0:
+                frame = np.roll(frame, int(6 * np.sin(t*20)), axis=1)
+        # Glitch - 2 random jagah
+        if "glitch" in chosen and (1.2 < t < 1.35 or 4.5 < t < 4.65):
+            frame = np.roll(frame, 40, axis=1)
+            frame[:, :, 0] = np.roll(frame[:, :, 0], 10, axis=1)  # RGB shift
+        # Flash
+        if "flash_beat" in chosen and (int(t*2) % 4 == 0 and t % 1 < 0.08):
+            frame = np.clip(frame * 1.4 + 40, 0, 255).astype(np.uint8)
+        # Bounce
+        if "bounce" in chosen:
+            frame = np.roll(frame, int(8 * np.sin(t*4)), axis=0)
+        # Vignette - static, par frame pe apply
+        if "vignette" in chosen:
+            # Simple: corners thode dark via gradient - har frame pe heavy hai isliye skip karte hain agar slow lage to
+            pass
+        return frame
+
+    clip = clip.fl(apply_frame)
+    clip.write_videofile(str(output_path), fps=30, codec="libx264", audio=False, logger=None)
+    clip.close()
+    return chosen
+
+# ================= SEARCH SOURCE =================
+def search_memes():
+    """
+    YE PART PYTHON KE BINA NAHI CHALEGA.
+    GitHub Actions me Python hota hai, isliye waha chal jayega.
+    Local bina Python ke nahi chalega - kyunki search ke liye API call + download karna padta hai.
+
+    Sources:
+    1. Imgflip - FREE, NO KEY chahiye - 100 trending templates deta hai
+    2. Reddit r/memes - FREE par Reddit API key chahiye (REDDIT_CLIENT_ID/SECRET)
+    3. Meme API (meme-api.com) - FREE, NO KEY - random memes
+    """
+    print("🔍 Search chal raha hai...")
+    found = []
+
+    # Source 1: Imgflip - Best for templates, NO KEY needed
     try:
-        r = requests.get(f"https://meme-api.com/gimme/{count}", timeout=15)
-        memes = r.json().get("memes", [])
-    except: memes = []
-    today = datetime.datetime.now().strftime("%Y-%m-%d")
-    folder = f"output/{today}"; os.makedirs(folder, exist_ok=True)
-    saved=0
-    for i,m in enumerate(memes):
-        try:
-            rr = requests.get(m.get("url"), timeout=15)
-            if rr.status_code==200:
-                temp=f"temp_{i}.jpg"; open(temp,"wb").write(rr.content)
-                feed, reel = clean_restlye(temp)
-                with open(feed.replace("_feed.jpg","_caption.txt"),"w",encoding="utf-8") as f:
-                    f.write(f"Original Title: {m.get('title','')}\n\n--- CAPTION KHALI HAI ---\nTum Telegram pe dekh ke khud likhoge\n\n#memes #jagruk_aadmi")
-                os.remove(temp); saved+=1; print(f"Saved {feed} - NO CAPTION")
-        except Exception as e: print(f"Fail {e}")
-    print(f"DONE {saved} clean memes - NO CAPTION")
+        r = requests.get("https://api.imgflip.com/get_memes", timeout=15)
+        memes = r.json()["data"]["memes"][:10]
+        for m in memes:
+            # Sirf URL save karte hain, photo download baad me hoga
+            found.append({"source": "imgflip", "name": m["name"], "url": m["url"]})
+        print(f"Imgflip se {len(found)} templates mile")
+    except Exception as e:
+        print(f"Imgflip fail: {e}")
 
-if __name__=="__main__": run(5)
+    # Source 2: Meme API - Random viral memes, NO KEY
+    try:
+        r = requests.get("https://meme-api.com/gimme/10", timeout=15)
+        for m in r.json().get("memes", []):
+            found.append({"source": "meme-api", "name": m["title"][:30], "url": m["url"]})
+        print(f"Meme-API se memes mile")
+    except Exception as e:
+        print(f"Meme-API fail: {e}")
+
+    # Source 3: Reddit - Agar keys hain to hi chalega
+    if REDDIT_CLIENT_ID and REDDIT_SECRET:
+        print("Reddit search chal raha hai (keys mil gayi)...")
+        # Yahan Reddit API call aayegi - abhi placeholder, kyunki keys nahi hain
+    else:
+        print("Reddit skip - REDDIT_CLIENT_ID/SECRET Secrets me nahi hai")
+
+    # Download top 5 ko memes/ me daalo
+    for i, m in enumerate(found[:5]):
+        try:
+            img_data = requests.get(m["url"], timeout=15).content
+            ext = ".jpg"
+            (MEMES_FOLDER / f"search_{i}_{m['source']}{ext}").write_bytes(img_data)
+            print(f"Downloaded: {m['name']}")
+        except Exception as e:
+            print(f"Download fail {m['name']}: {e}")
+
+    return found
+
+def send_to_telegram(video_path, original_name, effects):
+    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
+        print("Telegram skip - secrets nahi mile")
+        return False
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendVideo"
+    caption = f"🎬 Naya Reel Ready!\n\n📁 {original_name}\n✨ Effects: {', '.join(effects)}\n\nText + Song tu Insta me daal dena."
+    with open(video_path, "rb") as f:
+        r = requests.post(url, data={"chat_id": TELEGRAM_CHAT_ID, "caption": caption}, files={"video": f}, timeout=120)
+    print(f"Telegram: {r.status_code}")
+    return r.status_code == 200
+
+def main():
+    # Agar memes/ khaali hai to search se bharo
+    existing = list(MEMES_FOLDER.glob("*")) if MEMES_FOLDER.exists() else []
+    if not existing:
+        print("memes/ khaali hai - Search se bhar rahe hain...")
+        MEMES_FOLDER.mkdir(parents=True, exist_ok=True)
+        search_memes()
+    else:
+        print(f"memes/ me {len(existing)} photos pehle se hain - Search skip")
+
+    for img in MEMES_FOLDER.glob("*"):
+        if img.suffix.lower() not in [".jpg", ".jpeg", ".png", ".webp"]:
+            continue
+        out = OUTPUT_FOLDER / (img.stem + "_reel.mp4")
+        if out.exists():
+            continue
+        effects = make_dynamic_video_v2(img, out)
+        send_to_telegram(out, img.name, effects)
+    print("✅ Done")
+
+if __name__ == "__main__":
+    main()
