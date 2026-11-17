@@ -1,7 +1,7 @@
 moviepy==1.0.3
+Pillow==9.5.0
+numpy==1.26.4
 requests
-pillow
-numpy
-imageio
-imageio-ffmpeg
+imageio==2.31.6
+imageio-ffmpeg==0.4.8
 pyTelegramBotAPI
